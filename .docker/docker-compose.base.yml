@@ -1,0 +1,16 @@
+version: "3.7"
+services:
+  imtools:
+    build:
+      context: .
+    volumes:
+      - ..:/workspace
+      - ./zsh/history:/home/user/.zsh_history
+      - /var/run/docker.sock:/var/run/docker.sock
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [ gpu ]

@@ -1,0 +1,5 @@
+version: "3.7"
+services:
+  imtools:
+    container_name: geonu_imtools
+    shm_size: 16000000000 # ~16gb

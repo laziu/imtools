@@ -1,0 +1,50 @@
+FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
+
+LABEL maintainer="Geonu Kim <geonu.kim@postech.ac.kr>" \
+    description="pytorch image tools" \
+    version="torch1.11.0-cuda11.3-ubuntu20.04"
+
+RUN mkdir /workspace
+WORKDIR /workspace
+
+# Install some basic utilities
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    sudo git curl ca-certificates \
+    libx11-6 \
+    zsh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user
+RUN adduser --disabled-password --gecos '' --shell /bin/zsh user \
+    && chown -R user:user /workspace \
+    && echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-user
+# Install zsh and prezto
+RUN git clone --recursive https://github.com/sorin-ionescu/prezto.git "/home/user/.zprezto"
+RUN for rcfile in /home/user/.zprezto/runcoms/z*; do \
+    rcname=$(basename $rcfile); ln -s "$rcfile" "/home/user/.${rcname}"; done \
+    && sed -i "s/theme 'sorin'/theme 'powerlevel10k'/" /home/user/.zpreztorc \
+    && rm -rf "/home/user/.zsh_history"
+COPY zsh/p10k.zsh /home/user/.p10k.zsh
+COPY zsh/zshrc    /home/user/.zshrc
+
+# Switch to the user
+USER user
+# All users can use /home/user as their home directory
+ENV HOME=/home/user
+RUN chmod 777 /home/user
+
+# Install miniconda
+RUN curl -sLo ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39_4.11.0-Linux-x86_64.sh \
+    && chmod +x ~/miniconda.sh \
+    && ~/miniconda.sh -b -p ~/miniconda \
+    && rm -f ~/miniconda.sh
+ENV PATH=/home/user/miniconda/bin:$PATH
+# Install python packages
+COPY environments.cu11.yml /home/user/environments.yml
+RUN conda env update -n base -f ~/environments.yml \
+    && rm -f ~/environments.yml \
+    && conda clean -ya \
+    && conda develop /workspace
+
+CMD ["zsh"]

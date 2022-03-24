@@ -1,0 +1,6 @@
+version: "3.7"
+services:
+  imtools:
+    image: geonu/imtools:torch1.11.0-cuda10.2-ubuntu18.04
+    build:
+      dockerfile: Dockerfile.cu10
