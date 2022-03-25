@@ -6,6 +6,10 @@ from setuptools import setup, find_packages
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 ext_modules = [
+    ('_ext_correlation', [
+        'correlation/correlation_cuda.cc',
+        'correlation/correlation_cuda_kernel.cu',
+    ]),
 ]
 
 cxx_args = ['-std=c++14']
