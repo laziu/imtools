@@ -41,9 +41,9 @@ RUN curl -sLo ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39
     && rm -f ~/miniconda.sh
 ENV PATH=/home/user/miniconda/bin:$PATH
 # Install python packages
-COPY environments.cu10.yml /home/user/environments.yml
-RUN conda env update -n base -f ~/environments.yml \
-    && rm -f ~/environments.yml \
+COPY environment.cu10.yml /home/user/environment.yml
+RUN conda env update -n base -f ~/environment.yml \
+    && rm -f ~/environment.yml \
     && conda clean -ya \
     && conda develop /workspace
 
