@@ -137,3 +137,6 @@ results/
 
 # local cache
 .docker/zsh/history
+
+# no update files
+/.docker/docker-compose.local.yml
