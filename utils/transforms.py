@@ -277,34 +277,6 @@ class Rotate:
                       expand=self.expand, center=self.center, fill=self.fill)
 
 
-def to_grayscale(img: TArray, num_output_channels: int = 1):
-    """ Convert image to grayscale.
-
-    Args:
-        img: Image to be converted to grayscale.
-        num_output_channels: 1 -> single channel, 3 -> r=g=b.
-    """
-    if is_numpy := isinstance(img, np.ndarray):
-        dtype = img.dtype
-        img = numpy_to_tensor(img)
-
-    img = Ftrans.to_grayscale(img, num_output_channels)
-
-    if is_numpy:
-        img = tensor_to_numpy(img).astype(dtype)
-
-    return img
-
-
-class ToGrayscale:
-    def __init__(self, num_output_channels: int = 1) -> None:
-        """ Convert image to grayscale, see `to_grayscale` for more details. """
-        self.num_output_channels = num_output_channels
-
-    def __call__(self, image: TImage) -> TImage:
-        return to_grayscale(image, num_output_channels=self.num_output_channels)
-
-
 def erase(img: TArray, i: int, j: int, h: int, w: int, v: TArray, inplace: bool = False) -> TArray:
     """ Erase the given area of the input image with given value.
 
@@ -341,73 +313,3 @@ class Erase:
 
     def __call__(self, image: TImage) -> TImage:
         return erase(image, i=self.i, j=self.j, h=self.h, w=self.w, v=self.v, inplace=self.inplace)
-
-
-def invert(img: TArray) -> TArray:
-    """ Invert the image. """
-    if is_numpy := isinstance(img, np.ndarray):
-        dtype = img.dtype
-        img = numpy_to_tensor(img)
-
-    img = Ftrans.invert(img)
-
-    if is_numpy:
-        img = tensor_to_numpy(img).astype(dtype)
-
-    return img
-
-
-class Invert:
-    """ Invert the image, see `invert` for more details. """
-
-    def __call__(self, image: TImage) -> TImage:
-        return invert(image)
-
-
-def posterize(img: TArray, bits: int) -> TArray:
-    """ Reduce the number of bits for each pixel.
-
-    Args:
-        img: Image to be posterized.
-        bits: Number of bits to keep (0-8).
-    """
-    if is_numpy := isinstance(img, np.ndarray):
-        dtype = img.dtype
-        img = numpy_to_tensor(img)
-
-    img = Ftrans.posterize(img, bits)
-
-    if is_numpy:
-        img = tensor_to_numpy(img).astype(dtype)
-
-    return img
-
-
-class Posterize:
-    def __init__(self, bits: int) -> None:
-        """ Reduce the number of bits for each pixel, see `posterize` for more details. """
-        self.bits = bits
-
-    def __call__(self, image: TImage) -> TImage:
-        return posterize(image, bits=self.bits)
-
-
-def equalize(img: TArray) -> TArray:
-    """ Equalize the image histogram. """
-    if is_numpy := isinstance(img, np.ndarray):
-        dtype = img.dtype
-        img = numpy_to_tensor(img)
-
-    img = Ftrans.equalize(img)
-
-    if is_numpy:
-        img = tensor_to_numpy(img).astype(dtype)
-
-    return img
-
-
-class Equalize:
-    """ Equalize the image histogram, see `equalize` for more details. """
-
-    def __call__(self, image: TImage) -> TImage:
-        return equalize(image)

@@ -1,7 +1,8 @@
-import skimage.metrics
 from torch import Tensor
+import numpy as np
+import skimage.metrics
 
-from ..convert import reshape_numpy, im2tensor
+from ..convert import reshape_numpy, reshape_tensor, im2tensor
 from ..misc import TArray
 
 from . import torch as ptloss
@@ -16,6 +17,8 @@ def ssim_loss(x: TArray, y: TArray) -> TArray:
         window_size: Size of the window to use.
     """
     if isinstance(x, Tensor):
+        x = reshape_tensor(x, batch=True)
+        y = reshape_tensor(y, batch=True)
         return ptloss.ssim_loss(x, y)
     else:
         x = reshape_numpy(x)
@@ -37,6 +40,8 @@ def ssim(x: TArray, y: TArray) -> TArray:
 def psnr_loss(x: TArray, y: TArray) -> TArray:
     """ Compute the negative Peak Signal-to-Noise Ratio (-PSNR), i.e. PSNR loss. """
     if isinstance(x, Tensor):
+        x = reshape_tensor(x, batch=True)
+        y = reshape_tensor(y, batch=True)
         return ptloss.psnr_loss(x, y)
     else:
         x = reshape_numpy(x)
@@ -56,6 +61,6 @@ def psnr(x: TArray, y: TArray) -> TArray:
 
 def vgg_loss(x: TArray, y: TArray) -> TArray:
     """ Functional version of `VGGLoss`. """
-    x = im2tensor(x)
-    y = im2tensor(y)
+    x = im2tensor(x, batch=True)
+    y = im2tensor(y, batch=True)
     return ptloss.vgg_loss(x, y)

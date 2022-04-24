@@ -2,13 +2,21 @@ import torch
 import numpy as np
 import PIL.Image
 import matplotlib.pyplot as plt
-from skimage.util import montage
+from torchvision.transforms.functional import pad
+from torchvision.utils import make_grid
+# from skimage.util import montage
 from toolz import isiterable
 
-from .convert import im2numpy, im2float, im2uint8
+from .convert import im2numpy, im2tensor, im2float, im2uint8
 
 
-def imgrid(images, plot=False) -> np.ndarray:
+def _enumerate_noneable(iterable):
+    if iterable is None:
+        return []
+    return enumerate(iterable)
+
+
+def imgrid(images, padding=2, plot=False) -> np.ndarray:
     """ Montage images. """
     assert isiterable(images) and len(images) > 0 and all(map(isiterable, images)), "images must be a 2D list of images"
     assert any(len(row) > 0 for row in images), "images must contains at least one image"
@@ -16,17 +24,17 @@ def imgrid(images, plot=False) -> np.ndarray:
     nrows = len(images)
     ncols = max(len(row) for row in images)
 
-    imgs = [np.zeros((1, 1, 3), dtype=np.uint8)
+    imgs = [torch.zeros(3, 1, 1, dtype=torch.uint8)
             for _ in range(ncols)
             for _ in range(nrows)]
 
     max_h, max_w = 1, 1
-    for R, row in enumerate(images or []):
-        for C, img in enumerate(row or []):
-            img = im2uint8(im2numpy(img)).squeeze()
-            if img.ndim == 2:
-                img = np.expand_dims(img, -1)
-                img = np.tile(img, 3)
+    for R, row in _enumerate_noneable(images):
+        for C, img in _enumerate_noneable(row):
+            img = im2uint8(im2tensor(img))
+            assert img.ndim == 3, f"image must be a 3D tensor, received {img.ndim}"
+            if img.shape[0] == 1:
+                img = img.expand(3, *img.shape[1:])
 
             h, w = img.shape[-3:-1]
             max_h = max(max_h, h)
@@ -36,12 +44,12 @@ def imgrid(images, plot=False) -> np.ndarray:
 
     for i, img in enumerate(imgs):
         h, w = img.shape[-3:-1]
-        imgs[i] = np.pad(img, ((0, max_h - h), (0, max_w - w), (0, 0)), "constant", constant_values=0)
+        imgs[i] = pad(img, (0, 0, max_w - w, max_h - h), padding_mode="constant", fill=0)
 
-    results = montage(imgs, grid_shape=(nrows, ncols), channel_axis=-1)
+    results = make_grid(imgs, nrow=ncols, padding=padding)
     if plot:
         from IPython.display import display
-        display(PIL.Image.fromarray(results))
+        display(PIL.Image.fromarray(results.permute(1, 2, 0).numpy()))
 
     return results
 
@@ -95,20 +103,20 @@ def imgridplot(images, *, figsize=None,
         for _ in range(ncols)]
         for _ in range(nrows)]
 
-    for R, row in enumerate(images or []):
-        for C, img in enumerate(row or []):
+    for R, row in _enumerate_noneable(images):
+        for C, img in _enumerate_noneable(row):
             elems[R][C]["img"] = im2float(im2numpy(img)).squeeze()
 
-    for R, row in enumerate(titles or []):
-        for C, title in enumerate(row or []):
+    for R, row in _enumerate_noneable(titles):
+        for C, title in _enumerate_noneable(row):
             elems[R][C]["title"] = title
 
-    for R, row in enumerate(xlabels or []):
-        for C, xlabel in enumerate(row or []):
+    for R, row in _enumerate_noneable(xlabels):
+        for C, xlabel in _enumerate_noneable(row):
             elems[R][C]["xlabel"] = xlabel
 
-    for R, row in enumerate(ylabels or []):
-        for C, ylabel in enumerate(row or []):
+    for R, row in _enumerate_noneable(ylabels):
+        for C, ylabel in _enumerate_noneable(row):
             elems[R][C]["ylabel"] = ylabel
 
     for R, row in enumerate(elems):
