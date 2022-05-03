@@ -1,19 +1,22 @@
-FROM nvidia/cuda:10.2-devel-ubuntu18.04
+FROM nvidia/cuda:10.2-cudnn8-devel-ubuntu18.04
 
 LABEL maintainer="Geonu Kim <geonu.kim@postech.ac.kr>" \
     description="pytorch image tools" \
-    version="torch1.11.0-cuda10.2-ubuntu18.04"
+    version="torch1.11-cuda10.2-ubuntu18.04"
 
 RUN mkdir /workspace
 WORKDIR /workspace
 
 # Install some basic utilities
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    sudo git curl ca-certificates \
-    libx11-6 \
-    zsh \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    software-properties-common build-essential
+RUN add-apt-repository ppa:ubuntu-toolchain-r/test
+RUN apt-get update && apt-get upgrade -y && apt-get dist-upgrade -y
+RUN apt-get install -y \
+    sudo git curl ca-certificates libx11-6 zsh vim tmux \
+    && apt-get upgrade -y libstdc++6
+RUN rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user
 RUN adduser --disabled-password --gecos '' --shell /bin/zsh user \
@@ -41,10 +44,11 @@ RUN curl -sLo ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39
     && rm -f ~/miniconda.sh
 ENV PATH=/home/user/miniconda/bin:$PATH
 # Install python packages
+RUN conda update conda
+RUN conda install conda-build
 COPY environment.cu10.yml /home/user/environment.yml
-RUN conda env update -n base -f ~/environment.yml \
-    && rm -f ~/environment.yml \
-    && conda clean -ya \
-    && conda develop /workspace
+RUN conda env update -n base -f ~/environment.yml
+RUN rm -f ~/environment.yml && conda clean -ya
+RUN conda develop /workspace
 
 CMD ["zsh"]
