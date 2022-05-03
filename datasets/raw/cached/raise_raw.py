@@ -14,7 +14,7 @@ class RAISERaw(CachedCropDataset):
     def __init__(self, data_dir: str, datalist_path: str, cache_dir: str,
                  crop_config: CropConfig = None, unify_bayer: bool = False,
                  normalize: bool = True, post_transform: typing.Callable = None,
-                 **kwargs):
+                 skip_check: bool = False, **kwargs):
         """ RAISE RAW - RGB dataset, with cache.
 
         Args:
@@ -25,7 +25,8 @@ class RAISERaw(CachedCropDataset):
             unify_bayer: if True, unify bayer pattern to RGGB.
                 NOTE: set crop size to odd number since this option cut 1px from each side.
             normalize: normalize raw and rgb images to [0, 1].
-            transform: transform to apply to the data, must be able to handle (raw, rgb, bayer_mask) as input.
+            post_transform: transform to apply to the data, must be able to handle (raw, rgb, bayer_mask) as input.
+            skip_check: Set True if cache is already exist.
 
         Returns: dict
             - raw: raw image tensor.
@@ -42,6 +43,7 @@ class RAISERaw(CachedCropDataset):
             cache_dir=cache_dir,
             crop_config=crop_config,
             unify_bayer=unify_bayer,
+            skip_check=skip_check,
             **kwargs,
         )
         self.normalize      = normalize

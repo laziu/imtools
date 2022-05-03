@@ -92,7 +92,7 @@ class CachedCropDataset(torch.utils.data.Dataset):
 
     def __init__(self, dataset: torch.utils.data.Dataset, cache_dir: str,
                  crop_config: CropConfig = CropConfig(), unify_bayer: bool = False,
-                 **kwargs):
+                 skip_check: bool = False, **kwargs):
         """ Cached dataset.
 
         Args:
@@ -101,6 +101,7 @@ class CachedCropDataset(torch.utils.data.Dataset):
             crop_config: crop configuration.
             unify_bayer: if True, unify bayer pattern to RGGB.
                 NOTE: set crop size to odd number since this option cut 1px from each side.
+            skip_check: Set True if cache is already exist.
         """
         self.dataset = dataset
         self.cache_dir = Path(cache_dir)
@@ -114,7 +115,8 @@ class CachedCropDataset(torch.utils.data.Dataset):
         if "LAYER_KEYS" in kwargs:
             self.LAYER_KEYS = kwargs["LAYER_KEYS"]
 
-        self.cache_all()
+        if not skip_check:
+            self.cache_all()
 
     def __len__(self):
         return len(self.dataset)
