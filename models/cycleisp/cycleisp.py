@@ -140,16 +140,16 @@ class RRG(nn.Module):
 
 # RGB2RAW Network #############################################################
 class Rgb2Raw(nn.Module):
-    def __init__(self, conv=conv):
+    def __init__(self, n_rrg=3, n_dab=5, n_feat=96, reduction=8, ksize=3, conv=conv):
         super(Rgb2Raw, self).__init__()
         input_nc  = 3
         # output_nc = 4
 
-        num_rrg = 3
-        num_dab = 5
-        n_feats = 96
-        kernel_size = 3
-        reduction = 8
+        num_rrg = n_rrg
+        num_dab = n_dab
+        n_feats = n_feat
+        kernel_size = ksize
+        reduction = reduction
 
         act = nn.PReLU(n_feats)
 
@@ -178,16 +178,16 @@ class Rgb2Raw(nn.Module):
 
 # Color Correction Network ####################################################
 class CCM(nn.Module):
-    def __init__(self,  conv=conv):
+    def __init__(self, n_rrg=2, n_dab=2, n_feat=96, reduction=8, ksize=3, conv=conv):
         super(CCM, self).__init__()
         input_nc  = 3
-        output_nc = 96
+        output_nc = n_feat
 
-        num_rrg = 2
-        num_dab = 2
-        n_feats = 96
-        kernel_size = 3
-        reduction = 8
+        num_rrg = n_rrg
+        num_dab = n_dab
+        n_feats = n_feat
+        kernel_size = ksize
+        reduction = reduction
 
         sigma = 12  # GAUSSIAN_SIGMA
 
@@ -224,16 +224,16 @@ class CCM(nn.Module):
 
 # RAW2RGB Network #############################################################
 class Raw2Rgb(nn.Module):
-    def __init__(self, conv=conv):
+    def __init__(self, n_rrg=3, n_dab=5, n_feat=96, reduction=8, ksize=3, conv=conv):
         super(Raw2Rgb, self).__init__()
         input_nc  = 4
         output_nc = 3
 
-        num_rrg = 3
-        num_dab = 5
-        n_feats = 96
-        kernel_size = 3
-        reduction = 8
+        num_rrg = n_rrg
+        num_dab = n_dab
+        n_feats = n_feat
+        kernel_size = ksize
+        reduction = reduction
 
         act = nn.PReLU(n_feats)
 

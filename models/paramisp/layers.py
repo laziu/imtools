@@ -20,8 +20,7 @@ class ChannelAttention(nn.Module):
         self.relu    = nn.PReLU(n_channel // reduction, 0.1)
         self.conv2   = nn.Conv2d(n_channel // reduction, n_channel, 1)
         self.sigmoid = nn.Sigmoid()
-        # init.kaiming_normal_(self.conv1.weight)
-        init.xavier_normal_(self.conv1.weight)
+        init.kaiming_normal_(self.conv1.weight)
         init.xavier_normal_(self.conv2.weight)
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
@@ -66,8 +65,7 @@ class DualAttentionBlock(nn.Module):
         self.sp_attn = SpatialAttention(ksize)
         self.ch_attn = ChannelAttention(n_feat, reduction)
         self.conv_tail = nn.Conv2d(n_feat * 2, n_feat, 1)
-        # init.kaiming_normal_(self.conv1.weight)
-        init.xavier_normal_(self.conv1.weight)
+        init.kaiming_normal_(self.conv1.weight)
         init.xavier_normal_(self.conv2.weight)
         init.xavier_normal_(self.conv_tail.weight)
 
@@ -94,7 +92,6 @@ class RecursiveResidualGroup(nn.Module):
             for i in range(n_dab)
         ]))
         self.conv_tail = nn.Conv2d(n_feat, n_feat, ksize, padding=(ksize - 1) // 2, padding_mode="reflect")
-        # init.kaiming_normal_(self.conv_tail.weight)
         init.xavier_normal_(self.conv_tail.weight)
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:

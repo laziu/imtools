@@ -1,1 +1,1 @@
-from .models import BasicPipeline
+from .models import BasicPipeline, GuidedPipeline, ColorFeatureExtractor
