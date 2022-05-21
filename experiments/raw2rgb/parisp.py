@@ -41,7 +41,9 @@ utils.env.load()
 parser = argparse.ArgumentParser(description="RAW-RGB + Parameterized ISP",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("mode", choices=["train", "test"], help="train or test")
-parser.add_argument("model_type", choices=["cyisp", "cyisp_wb", "parisp_indep", "parisp_indep_detach"],
+parser.add_argument("model_type", choices=["cyisp", "cyisp_wb",
+                                           "parisp_indep", "parisp_indep_detach",
+                                           "parisp_naive", "parisp_naive_indep"],
                     help="model type")
 parser.add_argument("dataset_type", choices=["all", "realblurraw", "raise"],
                     help="dataset to use")
@@ -173,6 +175,8 @@ def main():
         case "cyisp_wb":            model = Model_CyispWB
         case "parisp_indep":        model = Model_ParispIndep
         case "parisp_indep_detach": model = Model_ParispIndepDetach
+        case "parisp_naive":        model = Model_ParispNaive
+        case "parisp_naive_indep":  model = Model_ParispNaiveIndep
     model = model(**vars(args))
 
     if args.pretrained is not None:
@@ -551,6 +555,215 @@ class Model_ParispIndep(pl.LightningModule):
             postfix = f"_{postfix}"
         torch.save(self.raw2rgb.state_dict(), f"{save_dir}/raw2rgb{postfix}.pt")
         torch.save(self.rgb2raw.state_dict(), f"{save_dir}/rgb2raw{postfix}.pt")
+
+
+class Model_ParispNaive(Model_ParispIndep):
+    def __init__(self, lr, lr_step, lr_gamma, weight_decay, momentum, logs_dir, save_image, **kwds):
+        super().__init__(lr, lr_step, lr_gamma, weight_decay, momentum, logs_dir, save_image, **kwds)
+        self.save_hyperparameters()
+        self.automatic_optimization = False
+
+        self.camera_keys = [
+            "SONY/ILCE-7RM3",
+            "NIKON CORPORATION/NIKON D7000",
+            "NIKON CORPORATION/NIKON D90",
+            "NIKON CORPORATION/NIKON D40",
+        ]
+
+        self.rgb2raw_model = nn.ModuleDict({
+            k: models.paramisp.BasicPipeline(3, 3, 24, n_dab=1)
+            for k in self.camera_keys})
+        self.raw2rgb_model = nn.ModuleDict({
+            k: models.paramisp.BasicPipeline(3, 3, 24, n_dab=1)
+            for k in self.camera_keys})
+
+    def process_raw2rgb(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        y = x
+        y = self.whitebalance(y, white_balance, bayer_mask)
+        y = self.demosaic(y, bayer_mask)
+        y = self.colormatrix(y, color_matrix)
+
+        # if self.current_epoch > 10:
+        y_ = [None] * len(camera_ids)
+        for i, camera_id in enumerate(camera_ids):
+            if camera_id in self.camera_keys:
+                y_[i] = self.raw2rgb_model[camera_id](y[i].unsqueeze(0))
+        y = torch.cat(y_, dim=0)
+
+        y = self.raw2rgb(y)
+        y = self.linear2srgb(y)
+        return y
+
+    def process_rgb2raw(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        y = x
+        y = self.srgb2linear(y)
+        y = self.rgb2raw(y)
+
+        y_ = [None] * len(camera_ids)
+        for i, camera_id in enumerate(camera_ids):
+            if camera_id in self.camera_keys:
+                y_[i] = self.rgb2raw_model[camera_id](y[i].unsqueeze(0))
+        y = torch.cat(y_, dim=0)
+
+        y = self.colormatrix(y, torch.inverse(color_matrix))
+        y = self.mosaic(y, bayer_mask)
+        y = self.whitebalance(y, 1 / white_balance, bayer_mask)
+        return y
+
+    def training_step(self, batch: dict, batch_idx: int):
+        raw, rgb, bayer_mask, white_balance, color_matrix, camera_ids, names = self.destruct_batch(batch)
+        optim_raw2rgb, optim_rgb2raw = self.optimizers()
+
+        rgb_est = self.process_raw2rgb(raw, bayer_mask, white_balance, color_matrix, camera_ids)
+        loss_rgb = self.compute_loss(rgb_est, rgb)
+
+        optim_raw2rgb.zero_grad()
+        self.manual_backward(loss_rgb)
+        optim_raw2rgb.step()
+
+        raw_est = self.process_rgb2raw(rgb, bayer_mask, white_balance, color_matrix, camera_ids)
+        loss_raw = self.compute_loss(raw_est, raw)
+
+        optim_rgb2raw.zero_grad()
+        self.manual_backward(loss_raw)
+        optim_rgb2raw.step()
+
+        self.log_dict({
+            "train/loss/raw": loss_raw,
+            "train/loss/rgb": loss_rgb,
+        }, prog_bar=True)
+
+        self.log_dict({
+            "step": self.current_epoch,
+            "train/epoch/loss/raw": loss_raw,
+            "train/epoch/loss/rgb": loss_rgb,
+        }, on_step=False, on_epoch=True)
+
+    def validation_step(self, batch: dict, batch_idx: int):
+        raw, rgb, bayer_mask, white_balance, color_matrix, camera_ids, names = self.destruct_batch(batch)
+
+        rgb_est = self.process_raw2rgb(raw, bayer_mask, white_balance, color_matrix, camera_ids)
+        raw_est = self.process_rgb2raw(rgb, bayer_mask, white_balance, color_matrix, camera_ids)
+
+        met_rgb = self.compute_metrics(rgb_est, rgb)
+        met_raw = self.compute_metrics(raw_est, raw)
+
+        self.log_dict({
+            "step": self.current_epoch,
+            "val/loss/rgb":  met_rgb["loss"],
+            "val/psnr/rgb":  met_rgb["psnr"],
+            "val/ssim/rgb":  met_rgb["ssim"],
+            "val/mssim/rgb": met_rgb["mssim"],
+            "val/loss/raw":  met_raw["loss"],
+            "val/psnr/raw":  met_raw["psnr"],
+            "val/ssim/raw":  met_raw["ssim"],
+            "val/mssim/raw": met_raw["mssim"],
+        }, on_step=False, on_epoch=True)
+
+        if batch_idx == 0:
+            plot = utils.imgrid([raw, raw_est, rgb, rgb_est])
+            utils.imsave(plot, f"{self.hparams.logs_dir}/val_latest.png")
+
+    def test_step(self, batch: dict, batch_idx: int):
+        raw, rgb, bayer_mask, white_balance, color_matrix, camera_ids, names = self.destruct_batch(batch)
+
+        rgb_est = self.process_raw2rgb(raw, bayer_mask, white_balance, color_matrix, camera_ids)
+        raw_est = self.process_rgb2raw(rgb, bayer_mask, white_balance, color_matrix, camera_ids)
+
+        met_rgb = self.compute_metrics(rgb_est, rgb)
+        met_raw = self.compute_metrics(raw_est, raw)
+
+        self.log_dict({
+            "step": self.current_epoch,
+            "test/loss/rgb":  met_rgb["loss"],
+            "test/psnr/rgb":  met_rgb["psnr"],
+            "test/ssim/rgb":  met_rgb["ssim"],
+            "test/mssim/rgb": met_rgb["mssim"],
+            "test/loss/raw":  met_raw["loss"],
+            "test/psnr/raw":  met_raw["psnr"],
+            "test/ssim/raw":  met_raw["ssim"],
+            "test/mssim/raw": met_raw["mssim"],
+        }, on_step=False, on_epoch=True)
+
+        if self.hparams.save_image:
+            for i in range(len(names)):
+                name = f"{camera_ids[i]}_{names[i]}".replace("/", "_")
+                utils.savetiff(raw_est[i], f"{self.hparams.logs_dir}/raw/{name}.tiff")
+                utils.imsave(rgb_est[i],   f"{self.hparams.logs_dir}/rgb/{name}.png")
+
+    def configure_optimizers(self):
+        models_raw2rgb = [self.raw2rgb, *list(self.raw2rgb_model.values())]
+        models_rgb2raw = [self.rgb2raw, *list(self.rgb2raw_model.values())]
+        params_raw2rgb = itertools.chain(*[model.parameters() for model in models_raw2rgb])
+        params_rgb2raw = itertools.chain(*[model.parameters() for model in models_rgb2raw])
+        optim_raw2rgb = torch.optim.Adam(params_raw2rgb, lr=self.hparams.lr,
+                                         weight_decay=self.hparams.weight_decay)
+        optim_rgb2raw = torch.optim.Adam(params_rgb2raw, lr=self.hparams.lr,
+                                         weight_decay=self.hparams.weight_decay)
+        sched_raw2rgb = torch.optim.lr_scheduler.StepLR(
+            optim_raw2rgb, self.hparams.lr_step, gamma=self.hparams.lr_gamma)
+        sched_rgb2raw = torch.optim.lr_scheduler.StepLR(
+            optim_rgb2raw, self.hparams.lr_step, gamma=self.hparams.lr_gamma)
+        return [optim_raw2rgb, optim_rgb2raw], [sched_raw2rgb, sched_rgb2raw]
+
+    def export_weights(self, save_dir: str, postfix: str = None):
+        if postfix is not None:
+            postfix = f"_{postfix}"
+        torch.save(self.raw2rgb.state_dict(), f"{save_dir}/raw2rgb{postfix}.pt")
+        torch.save(self.rgb2raw.state_dict(), f"{save_dir}/rgb2raw{postfix}.pt")
+
+
+class Model_ParispNaiveIndep(Model_ParispNaive):
+    def __init__(self, lr, lr_step, lr_gamma, weight_decay, momentum, logs_dir, save_image, **kwds):
+        super().__init__(lr, lr_step, lr_gamma, weight_decay, momentum, logs_dir, save_image, **kwds)
+        self.save_hyperparameters()
+        self.automatic_optimization = False
+
+        self.rgb2raw_model = models.paramisp.BasicPipeline(3, 3, 24, n_dab=1)
+        self.raw2rgb_model = models.paramisp.BasicPipeline(3, 3, 24, n_dab=1)
+
+    def process_raw2rgb(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        y = x
+        y = self.whitebalance(y, white_balance, bayer_mask)
+        y = self.demosaic(y, bayer_mask)
+        y = self.colormatrix(y, color_matrix)
+
+        y = self.raw2rgb_model(y)
+
+        y = self.raw2rgb(y)
+        y = self.linear2srgb(y)
+        return y
+
+    def process_rgb2raw(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        y = x
+        y = self.srgb2linear(y)
+        y = self.rgb2raw(y)
+
+        y = self.rgb2raw_model(y)
+
+        y = self.colormatrix(y, torch.inverse(color_matrix))
+        y = self.mosaic(y, bayer_mask)
+        y = self.whitebalance(y, 1 / white_balance, bayer_mask)
+        return y
+
+    def configure_optimizers(self):
+        models_raw2rgb = [self.raw2rgb, self.raw2rgb_model]
+        models_rgb2raw = [self.rgb2raw, self.rgb2raw_model]
+        params_raw2rgb = itertools.chain(*[model.parameters() for model in models_raw2rgb])
+        params_rgb2raw = itertools.chain(*[model.parameters() for model in models_rgb2raw])
+        optim_raw2rgb = torch.optim.Adam(params_raw2rgb, lr=self.hparams.lr,
+                                         weight_decay=self.hparams.weight_decay)
+        optim_rgb2raw = torch.optim.Adam(params_rgb2raw, lr=self.hparams.lr,
+                                         weight_decay=self.hparams.weight_decay)
+        sched_raw2rgb = torch.optim.lr_scheduler.StepLR(
+            optim_raw2rgb, self.hparams.lr_step, gamma=self.hparams.lr_gamma)
+        sched_rgb2raw = torch.optim.lr_scheduler.StepLR(
+            optim_rgb2raw, self.hparams.lr_step, gamma=self.hparams.lr_gamma)
+        return [optim_raw2rgb, optim_rgb2raw], [sched_raw2rgb, sched_rgb2raw]
 
 
 class Model_ParispIndepDetach(Model_ParispIndep):
