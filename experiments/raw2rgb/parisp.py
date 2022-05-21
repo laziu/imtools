@@ -5,6 +5,7 @@ import shutil
 import random
 import itertools
 import os
+import json
 import multiprocessing as mp
 import gc
 from datetime import datetime
@@ -150,7 +151,6 @@ def main():
     args.wght_dir = f"{args.save_dir}/{args.postfix_wght}"
     args.logs_dir = f"{args.save_dir}/{args.postfix_logs}/{args.mode}"
 
-    Path(args.wght_dir).mkdir(parents=True, exist_ok=True)
     if args.resume_logs:
         shutil.copytree(args.resume_logs, args.logs_dir)
 
@@ -199,9 +199,11 @@ def main():
         trainer.fit(model, datamodule=data, ckpt_path=args.resume_ckpt)
 
         trainer.save_checkpoint(f"{args.ckpt_dir}/final.ckpt")
+        Path(args.wght_dir).mkdir(parents=True, exist_ok=True)
         model.export_weights(args.wght_dir)
     elif args.mode == "test":
-        trainer.test(model, datamodule=data, ckpt_path=args.resume_ckpt)
+        results = trainer.test(model, datamodule=data, ckpt_path=args.resume_ckpt)
+        utils.savejson(results, f"{args.logs_dir}/results.json")
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 
@@ -511,6 +513,13 @@ class Model_ParispIndep(pl.LightningModule):
     def test_step(self, batch: dict, batch_idx: int):
         raw, rgb, bayer_mask, white_balance, color_matrix, camera_ids, names = self.destruct_batch(batch)
 
+        H, W = raw.shape[-2:]
+        H = H // 2 * 2
+        W = W // 2 * 2
+        raw = raw[:, :, :H, :W]
+        rgb = rgb[:, :, :H, :W]
+        bayer_mask = bayer_mask[:, :, :H, :W]
+
         rgb_est = self.process_raw2rgb(raw, bayer_mask, white_balance, color_matrix)
         raw_est = self.process_rgb2raw(rgb, bayer_mask, white_balance, color_matrix)
 
@@ -706,6 +715,13 @@ class Model_CyispWB(pl.LightningModule):
 
     def test_step(self, batch: dict, batch_idx: int):
         raw, rgb, bayer_mask, white_balance, camera_ids, names = self.destruct_batch(batch)
+
+        H, W = raw.shape[-2:]
+        H = H // 2 * 2
+        W = W // 2 * 2
+        raw = raw[:, :, :H, :W]
+        rgb = rgb[:, :, :H, :W]
+        bayer_mask = bayer_mask[:, :, :H, :W]
 
         rgb_est = self.process_raw2rgb(raw, rgb, bayer_mask, white_balance)
         raw_est = self.process_rgb2raw(raw, rgb, bayer_mask, white_balance)
