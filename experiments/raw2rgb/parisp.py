@@ -44,7 +44,8 @@ parser = argparse.ArgumentParser(description="RAW-RGB + Parameterized ISP",
 parser.add_argument("mode", choices=["train", "test"], help="train or test")
 parser.add_argument("model_type", choices=["cyisp", "cyisp_wb",
                                            "parisp_indep", "parisp_indep_detach",
-                                           "parisp_naive", "parisp_naive_indep"],
+                                           "parisp_naive", "parisp_naive_indep",
+                                           "parisp_hyper", "parisp_hyper_indep"],
                     help="model type")
 parser.add_argument("dataset_type", choices=["all", "realblurraw", "raise"],
                     help="dataset to use")
@@ -177,6 +178,8 @@ def main():
         case "parisp_indep_detach": model = Model_ParispIndepDetach
         case "parisp_naive":        model = Model_ParispNaive
         case "parisp_naive_indep":  model = Model_ParispNaiveIndep
+        case "parisp_hyper":        model = Model_ParispHyper
+        case "parisp_hyper_indep":  model = Model_ParispHyperIndep
     model = model(**vars(args))
 
     if args.pretrained is not None:
@@ -773,6 +776,66 @@ class Model_ParispNaiveIndep(Model_ParispNaive):
         sched_rgb2raw = torch.optim.lr_scheduler.StepLR(
             optim_rgb2raw, self.hparams.lr_step, gamma=self.hparams.lr_gamma)
         return [optim_raw2rgb, optim_rgb2raw], [sched_raw2rgb, sched_rgb2raw]
+
+
+class Model_ParispHyper(Model_ParispNaive):
+    def __init__(self, lr, lr_step, lr_gamma, weight_decay, momentum, logs_dir, save_image, **kwds):
+        super().__init__(lr, lr_step, lr_gamma, weight_decay, momentum, logs_dir, save_image, **kwds)
+        self.save_hyperparameters()
+        self.automatic_optimization = False
+
+        self.embedding = nn.Embedding(16, 4)
+        self.rgb2raw_hyper = models.paramisp.HyperPipeline(4, 3, 3, 24, n_dab=1)
+        self.raw2rgb_hyper = models.paramisp.HyperPipeline(4, 3, 3, 24, n_dab=1)
+
+    def camera_keys(self, camera_id):
+        camera_keys = {
+            "SONY/ILCE-7RM3": 1,
+            "NIKON CORPORATION/NIKON D7000": 2,
+            "NIKON CORPORATION/NIKON D90": 3,
+            "NIKON CORPORATION/NIKON D40": 4,
+        }
+        if camera_id in camera_keys:
+            return camera_keys[camera_id]
+        return 0
+
+    def process_raw2rgb(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        camera_keys = [self.camera_keys(camera_id) for camera_id in camera_ids]
+        print(camera_keys)
+        y = x
+        y = self.whitebalance(y, white_balance, bayer_mask)
+        y = self.demosaic(y, bayer_mask)
+        y = self.colormatrix(y, color_matrix)
+        y = self.raw2rgb_hyper(y, self.embedding(camera_keys))
+        y = self.raw2rgb(y)
+        y = self.linear2srgb(y)
+        return y
+
+    def process_rgb2raw(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        camera_keys = [self.camera_keys(camera_id) for camera_id in camera_ids]
+        print(camera_keys)
+        y = x
+        y = self.srgb2linear(y)
+        y = self.rgb2raw(y)
+        y = self.rgb2raw_hyper(y, self.embedding(camera_keys))
+        y = self.colormatrix(y, torch.inverse(color_matrix))
+        y = self.mosaic(y, bayer_mask)
+        y = self.whitebalance(y, 1 / white_balance, bayer_mask)
+        return y
+
+
+class Model_ParispHyperIndep(Model_ParispHyper):
+    def process_raw2rgb(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        camera_ids = ["" for camera_id in camera_ids]
+        return super().process_raw2rgb(x, bayer_mask, white_balance, color_matrix, camera_ids)
+
+    def process_rgb2raw(self, x: torch.Tensor, bayer_mask: torch.Tensor,
+                        white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
+        camera_ids = ["" for camera_id in camera_ids]
+        return super().process_rgb2raw(x, bayer_mask, white_balance, color_matrix, camera_ids)
 
 
 class Model_ParispIndepDetach(Model_ParispIndep):
