@@ -91,7 +91,7 @@ class CachedCropDataset(torch.utils.data.Dataset):
     LAYER_KEYS = ["raw", "rgb", "bayer_mask"]
 
     def __init__(self, dataset: torch.utils.data.Dataset, cache_dir: str,
-                 crop_config: CropConfig = CropConfig(), unify_bayer: bool = False,
+                 crop_config: CropConfig = None, unify_bayer: bool = False,
                  skip_check: bool = False, **kwargs):
         """ Cached dataset.
 
@@ -105,7 +105,7 @@ class CachedCropDataset(torch.utils.data.Dataset):
         """
         self.dataset = dataset
         self.cache_dir = Path(cache_dir)
-        self.crop_config = crop_config
+        self.crop_config = crop_config or CropConfig()
         self.unify_bayer = unify_bayer
 
         if "MULTIPROCESSING" in kwargs:
