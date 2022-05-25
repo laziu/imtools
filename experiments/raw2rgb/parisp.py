@@ -785,10 +785,10 @@ class Model_ParispHyper(Model_ParispNaive):
         self.automatic_optimization = False
 
         self.embedding = nn.Embedding(16, 4)
-        self.rgb2raw_hyper = models.paramisp.HyperPipeline(4, 3, 3, 24, n_dab=1)
-        self.raw2rgb_hyper = models.paramisp.HyperPipeline(4, 3, 3, 24, n_dab=1)
+        self.rgb2raw_model = models.paramisp.HyperPipeline(4, 3, 3, 24, n_dab=1)
+        self.raw2rgb_model = models.paramisp.HyperPipeline(4, 3, 3, 24, n_dab=1)
 
-    def camera_keys(self, camera_id):
+    def camera_nums(self, camera_id):
         camera_keys = {
             "SONY/ILCE-7RM3": 1,
             "NIKON CORPORATION/NIKON D7000": 2,
@@ -801,29 +801,42 @@ class Model_ParispHyper(Model_ParispNaive):
 
     def process_raw2rgb(self, x: torch.Tensor, bayer_mask: torch.Tensor,
                         white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
-        camera_keys = [self.camera_keys(camera_id) for camera_id in camera_ids]
-        print(camera_keys)
+        camera_keys = torch.tensor([self.camera_nums(camera_id) for camera_id in camera_ids], device=x.device)
         y = x
         y = self.whitebalance(y, white_balance, bayer_mask)
         y = self.demosaic(y, bayer_mask)
         y = self.colormatrix(y, color_matrix)
-        y = self.raw2rgb_hyper(y, self.embedding(camera_keys))
+        y = self.raw2rgb_model(y, self.embedding(camera_keys))
         y = self.raw2rgb(y)
         y = self.linear2srgb(y)
         return y
 
     def process_rgb2raw(self, x: torch.Tensor, bayer_mask: torch.Tensor,
                         white_balance: torch.Tensor, color_matrix: torch.Tensor, camera_ids) -> torch.Tensor:
-        camera_keys = [self.camera_keys(camera_id) for camera_id in camera_ids]
-        print(camera_keys)
+        camera_keys = torch.tensor([self.camera_nums(camera_id) for camera_id in camera_ids], device=x.device)
         y = x
         y = self.srgb2linear(y)
         y = self.rgb2raw(y)
-        y = self.rgb2raw_hyper(y, self.embedding(camera_keys))
+        y = self.rgb2raw_model(y, self.embedding(camera_keys))
         y = self.colormatrix(y, torch.inverse(color_matrix))
         y = self.mosaic(y, bayer_mask)
         y = self.whitebalance(y, 1 / white_balance, bayer_mask)
         return y
+
+    def configure_optimizers(self):
+        models_raw2rgb = [self.raw2rgb, self.raw2rgb_model]
+        models_rgb2raw = [self.rgb2raw, self.rgb2raw_model]
+        params_raw2rgb = itertools.chain(*[model.parameters() for model in models_raw2rgb])
+        params_rgb2raw = itertools.chain(*[model.parameters() for model in models_rgb2raw])
+        optim_raw2rgb = torch.optim.Adam(params_raw2rgb, lr=self.hparams.lr,
+                                         weight_decay=self.hparams.weight_decay)
+        optim_rgb2raw = torch.optim.Adam(params_rgb2raw, lr=self.hparams.lr,
+                                         weight_decay=self.hparams.weight_decay)
+        sched_raw2rgb = torch.optim.lr_scheduler.StepLR(
+            optim_raw2rgb, self.hparams.lr_step, gamma=self.hparams.lr_gamma)
+        sched_rgb2raw = torch.optim.lr_scheduler.StepLR(
+            optim_rgb2raw, self.hparams.lr_step, gamma=self.hparams.lr_gamma)
+        return [optim_raw2rgb, optim_rgb2raw], [sched_raw2rgb, sched_rgb2raw]
 
 
 class Model_ParispHyperIndep(Model_ParispHyper):
