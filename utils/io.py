@@ -1,5 +1,6 @@
 from pathlib import Path
 from time import sleep
+import json
 
 import torch
 import numpy as np
@@ -110,3 +111,15 @@ def loadpt(*path, map_location=None) -> torch.Tensor:
 def savept(tensor, *path):
     path = Path(*path).as_posix()
     torch.save(tensor, path)
+
+
+def loadjson(*path):
+    path = Path(*path).as_posix()
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def savejson(obj, *path):
+    path = Path(*path).as_posix()
+    with open(path, "w") as f:
+        json.dump(obj, f)

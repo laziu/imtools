@@ -4,7 +4,8 @@ from . import path
 
 
 from .io import imload, imsave, loadraw, loadexif, loadtiff, savetiff, \
-    loadnpy, savenpy, savenpz, loadnptxt, savenptxt, loadmat, savemat, loadpt, savept
+    loadnpy, savenpy, savenpz, loadnptxt, savenptxt, loadmat, savemat, loadpt, savept, \
+    loadjson, savejson
 from .convert import as_torch_dtype, as_np_dtype, \
     is_floating_torch_dtype, is_integer_torch_dtype, is_complex_torch_dtype, \
     is_floating_dtype, is_integer_dtype, is_complex_dtype, \
@@ -23,6 +24,7 @@ __all__ = [
     # io
     "imload", "imsave", "loadraw", "loadexif", "loadtiff", "savetiff",
     "loadnpy", "savenpy", "savenpz", "loadnptxt", "savenptxt", "loadmat", "savemat", "loadpt", "savept",
+    "loadjson", "savejson",
     # convert
     "as_torch_dtype", "as_np_dtype",
     "is_floating_torch_dtype", "is_integer_torch_dtype", "is_complex_torch_dtype",
