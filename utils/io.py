@@ -1,6 +1,7 @@
 from pathlib import Path
 from time import sleep
 import json
+import yaml
 
 import torch
 import numpy as np
@@ -123,3 +124,15 @@ def savejson(obj, *path):
     path = Path(*path).as_posix()
     with open(path, "w") as f:
         json.dump(obj, f)
+
+
+def loadyaml(*path):
+    path = Path(*path).as_posix()
+    with open(path, "r") as f:
+        return yaml.load(f)
+
+
+def saveyaml(obj, *path):
+    path = Path(*path).as_posix()
+    with open(path, "w") as f:
+        yaml.dump(obj, f)
