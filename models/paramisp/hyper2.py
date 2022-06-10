@@ -35,9 +35,25 @@ class Linear(nn.Linear):
         init_weights(self.weight)
 
 
+class DenseLinear(nn.Module):
+    def __init__(self, n_channels: int):
+        super().__init__()
+        self.fc1 = Linear(n_channels, n_channels)
+        self.fc2 = Linear(n_channels * 2, n_channels)
+        self.fc3 = Linear(n_channels * 3, n_channels)
+        self.fc4 = Linear(n_channels * 4, n_channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y1 = F.leaky_relu(self.fc1(x))
+        y2 = F.leaky_relu(self.fc2(torch.cat([x, y1], dim=-1)))
+        y3 = F.leaky_relu(self.fc3(torch.cat([x, y1, y2], dim=-1)))
+        y4 = F.leaky_relu(self.fc4(torch.cat([x, y1, y2, y3], dim=-1)))
+        return y4
+
+
 class HyperConv2dKernelNet(nn.Module):
     def __init__(self, h_embeddings: int, in_channels: int, out_channels: int, kernel_size: int,
-                 *, mid_channels: int = 256, n_layers: int = 8):
+                 *, mid_channels: int = 256, n_blocks: int = 1):
         """ Embed hyperparameters to a convolution kernel. """
         super().__init__()
 
@@ -47,22 +63,36 @@ class HyperConv2dKernelNet(nn.Module):
         # conv weight: (out_channels, in_channels, kernel_size, kernel_size)
         # conv bias:   (out_channels)
 
+        def init_decomposed_xavier_normal_(w: torch.Tensor, gain: float = 0.03):
+            std_target = math.sqrt(2.0 / ((out_channels + in_channels) * (kernel_size ** 2)))
+            std_vector = std_target ** (1 / 3)
+            with torch.no_grad():
+                w.normal_(0, gain * std_vector)
+
         layers = []
         layers.append(Linear(h_embeddings, mid_channels))
         layers.append(nn.LeakyReLU())
-        for _ in range(1, n_layers - 1):
-            layers.append(Linear(mid_channels, mid_channels))
+        for _ in range(n_blocks):
+            layers.append(DenseLinear(mid_channels))
             layers.append(nn.LeakyReLU())
-        layers.append(Linear(mid_channels, 2 * (in_channels + out_channels + kernel_size ** 2),
-                             init_weights=init.xavier_normal_))
+        layers.append(Linear(mid_channels, in_channels + out_channels + kernel_size ** 2,
+                             init_weights=init_decomposed_xavier_normal_))
         self.layers = nn.Sequential(*layers)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
-        weights: torch.Tensor = self.layers(h).flatten()
+        weight: torch.Tensor = self.layers(h)
+
+        cut1 = self.out_channels
+        cut2 = cut1 + self.in_channels
+
+        gamma, phi, psi = weight[:cut1], weight[cut1:cut2], weight[cut2:]
+        return (gamma.view(self.out_channels, 1, 1, 1) *
+                phi.view(1,    self.in_channels, 1, 1) *
+                psi.view(1, 1, self.kernel_size, self.kernel_size))
 
         cut = self.in_channels + self.out_channels + self.kernel_size ** 2
-        alpha = self.compose_kernel(weights[:cut])
-        beta  = self.compose_kernel(weights[cut:])
+        alpha = self.compose_kernel(weights[..., :cut]) * 1.0
+        beta  = self.compose_kernel(weights[..., cut:]) * 0.05
 
         return alpha, beta
 
@@ -78,15 +108,20 @@ class HyperConv2dKernelNet(nn.Module):
 
 
 class HyperConv2d(Conv2d):
-    def __init__(self, h_embeddings: int, in_channels: int, out_channels: int, kernel_size: int, **kwargs):
+    def __init__(self, h_embeddings: int, in_channels: int, out_channels: int, kernel_size: int,
+                 gain_alpha: float = 1.0, gain_beta: float = 0.05, ** kwargs):
         """ Embed hyperparameters to a convolution. """
         super().__init__(in_channels, out_channels, kernel_size, **kwargs)
 
-        self.affine_weights = HyperConv2dKernelNet(h_embeddings, in_channels, out_channels, kernel_size)
+        self.gain_alpha = gain_alpha
+        self.gain_beta  = gain_beta
+        self.alpha = HyperConv2dKernelNet(h_embeddings, in_channels, out_channels, kernel_size)
+        self.beta  = HyperConv2dKernelNet(h_embeddings, in_channels, out_channels, kernel_size)
 
     def hypertrain(self, enable: bool):
         """ Enable/disable hyperparameter training. """
-        for param in self.affine_weights.parameters():
+        for param in itertools.chain(self.alpha.parameters(),
+                                     self.beta.parameters()):
             param.requires_grad = enable
         self.weight.requires_grad = not enable
         self.bias.requires_grad   = not enable
@@ -95,15 +130,26 @@ class HyperConv2d(Conv2d):
         if h is None:
             return self._conv_forward(x, self.weight, self.bias)
         else:
-            y = []
+            def calculate_weight(hparam: torch.Tensor) -> torch.Tensor:
+                alpha: torch.Tensor = self.alpha(hparam) * self.gain_alpha
+                beta:  torch.Tensor = self.beta(hparam)  * self.gain_beta
+                return (1 + F.elu(alpha)) * self.weight + beta
 
-            for b in range(x.size(0)):
-                alpha, beta = self.affine_weights(h[b])
-                weight = (1 + alpha) * self.weight + beta
+            inputs  = x.reshape(1, -1, x.size(2), x.size(3))
+            weights = torch.cat([calculate_weight(hparam) for hparam in h], dim=0)
 
-                y.append(self._conv_forward(x[b:b + 1], weight, self.bias))
+            y: torch.Tensor
+            if self.padding_mode != "zeros":
+                y = F.conv2d(F.pad(inputs, self._reversed_padding_repeated_twice, mode=self.padding_mode),
+                             weights, stride=self.stride,
+                             padding=0, dilation=self.dilation, groups=self.groups * x.size(0))
+            else:
+                y = F.conv2d(inputs, weights, stride=self.stride,
+                             padding=self.padding, dilation=self.dilation, groups=self.groups * x.size(0))
 
-            return torch.cat(y, dim=0)
+            y = y.reshape(x.size(0), -1, y.size(2), y.size(3))
+            y = y + self.bias.view(1, -1, 1, 1)
+            return y
 
 
 class ChannelAttn(nn.Module):
@@ -160,8 +206,7 @@ class HyperDualAttn(nn.Module):
                                      self.sp_attn.parameters(),
                                      self.ch_attn.parameters()):
             param.requires_grad = not enable
-        for param in self.conv_tail.parameters():
-            param.requires_grad = enable
+        self.conv_tail.hypertrain(enable)
 
     def forward(self, x: torch.Tensor, h: torch.Tensor | None) -> torch.Tensor:
         r = self.conv_head(x)
@@ -189,8 +234,7 @@ class HyperResBlk(nn.Module):
         for dab in self.dabs:
             dab: HyperDualAttn
             dab.hypertrain(enable)
-        for param in self.conv_tail.parameters():
-            param.requires_grad = enable
+        self.conv_tail.hypertrain(enable)
 
     def forward(self, x: torch.Tensor, h: torch.Tensor):
         r = x

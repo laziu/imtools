@@ -35,7 +35,7 @@ utils.env.load()
 
 parser = argparse.ArgumentParser(description="RAW-RGB + Parameterized ISP",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("mode", choices=["train-content", "train-hypernet", "test"], help="train or test")
+parser.add_argument("mode", choices=["train-content", "train-hyper", "test"], help="train or test")
 parser.add_argument("-o", "--save-name", metavar="NAME", default="RAW2RGB_HyperParISP",     help="name to save results")              # noqa: E501
 parser.add_argument("-O", "--save-root", metavar="PATH", default=utils.path.get("results"), help="parent directory to save results")  # noqa: E501
 parser.add_argument("--cache-root",     metavar="PATH", default=utils.env.get("DATA_CACHE"),   help="path to cache the splitted dataset")  # noqa: E501
@@ -97,10 +97,14 @@ def main():
     args.ckpt_dir = f"{args.save_dir}/{args.ckpt_postfix}"
     args.logs_dir = f"{args.save_dir}/{args.logs_postfix}/{args.mode}"
 
-    if args.resume is not None and not Path(args.ckpt_dir, args.resume).exists():
-        raise FileNotFoundError(f"{args.resume=} does not exist")
-    if args.load is not None and not Path(args.ckpt_dir, args.load).exists():
-        raise FileNotFoundError(f"{args.load=} does not exist")
+    if args.resume is not None:
+        args.resume = utils.path.purify(args.resume)
+        if not Path(args.resume).exists():
+            raise FileNotFoundError(f"{args.resume=} does not exist")
+    if args.load is not None:
+        args.load = utils.path.purify(args.load)
+        if not Path(args.load).exists():
+            raise FileNotFoundError(f"{args.load=} does not exist")
 
     Path(args.ckpt_dir).mkdir(parents=True, exist_ok=True)
     Path(args.logs_dir).mkdir(parents=True, exist_ok=True)
@@ -108,9 +112,9 @@ def main():
     if args.mode == "train-content":
         args.mode = "train"
         args.train_mode = "content"
-    elif args.mode == "train-style":
+    elif args.mode == "train-hyper":
         args.mode = "train"
-        args.train_mode = "style"
+        args.train_mode = "hyper"
     else:
         args.train_mode = None
 
@@ -367,7 +371,7 @@ class Model(pl.LightningModule):
                 self.hypertrain(False)
             case ("train", "hyper"):
                 self.hypertrain(True)
-                self.load_model()
+                self.load_model(remove_hyper=True)
             case ("test", _):
                 self.load_model()
             case _:
@@ -410,9 +414,16 @@ class Model(pl.LightningModule):
         self.forward_net.hypertrain(enable)
         self.inverse_net.hypertrain(enable)
 
-    def load_model(self):
-        ckpt = utils.loadpt(self.hparams.load)
-        self.load_state_dict(ckpt["state_dict"])
+    def load_model(self, remove_hyper: bool = False):
+        states = utils.loadpt(self.hparams.load)["state_dict"]
+        del states["D65_TO_D50"]
+        del states["XYZ_TO_SRGB_D65"]
+        if remove_hyper:
+            for key in [*states.keys()]:
+                if ".affine_weights." in key:
+                    del states[key]
+
+        self.load_state_dict(states, strict=not remove_hyper)
 
     def configure_optimizers(self):
         optim_fwd = torch.optim.Adam(
@@ -565,7 +576,7 @@ class Model(pl.LightningModule):
             "val/raw/mssim": metrics_raw["mssim"],
         }, on_step=False, on_epoch=True)
 
-        if batch_idx == 0 and self.current_epoch % 5 == 0:
+        if batch_idx == 0 and (self.current_epoch < 10 or self.current_epoch % 5 == 0):
             plot = utils.imgrid([raw, raw_est, rgb, rgb_est])
             utils.imsave(plot, f"{self.hparams.logs_dir}/images/val/{self.current_epoch}.png")
 
