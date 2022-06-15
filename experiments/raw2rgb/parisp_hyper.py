@@ -36,6 +36,7 @@ utils.env.load()
 parser = argparse.ArgumentParser(description="RAW-RGB + Parameterized ISP",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("mode", choices=["train-content", "train-hyper", "test"], help="train or test")
+parser.add_argument("data", choices=["known", "unknown", "all"], nargs="?", help="Dataset to train hypernet")
 parser.add_argument("-o", "--save-name", metavar="NAME", default="RAW2RGB_HyperParISP",     help="name to save results")              # noqa: E501
 parser.add_argument("-O", "--save-root", metavar="PATH", default=utils.path.get("results"), help="parent directory to save results")  # noqa: E501
 parser.add_argument("--cache-root",     metavar="PATH", default=utils.env.get("DATA_CACHE"),   help="path to cache the splitted dataset")  # noqa: E501
@@ -129,6 +130,15 @@ def main():
 def train(args):
     model = Model(args)
 
+    if args.data is not None:
+        match args.data:
+            case "known":   data = Data_TrainLarge(args)
+            case "unknown": data = Data_TrainSmall(args)
+            case "all":     data = Data_TrainAll(args)
+            case _: raise ValueError(f"unknown data: {args.data}")
+    else:
+        data = Data_TrainLarge(args)
+
     logger = TensorBoardLogger(save_dir=args.save_dir, name=args.logs_postfix,
                                version=f"{args.mode}-{args.train_mode}")
 
@@ -145,7 +155,7 @@ def train(args):
     trainer: pl.Trainer = pl.Trainer.from_argparse_args(
         args, logger=logger, callbacks=callbacks, profiler=args.profiler)
 
-    results = trainer.fit(model, datamodule=Data_TrainLarge(args), ckpt_path=args.resume)
+    results = trainer.fit(model, datamodule=data, ckpt_path=args.resume)
     utils.saveyaml(results, f"{args.logs_dir}/results.yaml")
     trainer.save_checkpoint(f"{args.ckpt_dir}/{args.train_mode}-final.ckpt")
 
