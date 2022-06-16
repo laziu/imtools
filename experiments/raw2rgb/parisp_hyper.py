@@ -383,6 +383,7 @@ class Model(pl.LightningModule):
                 self.hypertrain(True)
                 self.load_model(remove_hyper=True)
             case ("test", _):
+                self.hypertrain(True)
                 self.load_model()
             case _:
                 raise ValueError(f"Invalid mode: {self.hparams.mode}/{self.hparams.train_mode}")
@@ -593,6 +594,11 @@ class Model(pl.LightningModule):
     def test_step(self, batch: dict, batch_idx: int):
         raw, rgb, mask, wb, cmat, camera_ids, image_names = self.destruct_batch(batch)
 
+        H, W = raw.shape[-2:]
+        raw   = raw[..., :2 * (H // 2), :2 * (W // 2)]
+        rgb   = rgb[..., :2 * (H // 2), :2 * (W // 2)]
+        mask = mask[..., :2 * (H // 2), :2 * (W // 2)]
+
         rgb_est = self.forward_process(raw, mask, wb, cmat, camera_ids)
         raw_est = self.inverse_process(rgb, mask, wb, cmat, camera_ids)
 
@@ -615,8 +621,8 @@ class Model(pl.LightningModule):
             camera_names = batch["camera_id"]
             for i in range(len(image_names)):
                 name = f"{camera_names[i]}_{image_names[i]}".replace("/", "_")
-                utils.savetiff(raw_est[i], f"{self.hparams.logs_dir}/images/raw/{name}.tiff")
-                utils.imsave(rgb_est[i],   f"{self.hparams.logs_dir}/images/rgb/{name}.png")
+                utils.savetiff(raw_est[i],               f"{self.hparams.logs_dir}/images/raw/{name}.tiff")
+                utils.imsave(utils.im2uint8(rgb_est[i]), f"{self.hparams.logs_dir}/images/rgb/{name}.png")
 
 
 if __name__ == "__main__":
