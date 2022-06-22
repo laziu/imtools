@@ -37,6 +37,7 @@ parser = argparse.ArgumentParser(description="RAW-RGB + Parameterized ISP",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("mode", choices=["train-content", "train-hyper", "test"], help="train or test")
 parser.add_argument("data", choices=["known", "unknown", "all"], nargs="?", help="Dataset to train hypernet")
+parser.add_argument("--disable-id", action="store_true", help="Disable camera id inputs")
 parser.add_argument("-o", "--save-name", metavar="NAME", default="RAW2RGB_HyperParISP",     help="name to save results")              # noqa: E501
 parser.add_argument("-O", "--save-root", metavar="PATH", default=utils.path.get("results"), help="parent directory to save results")  # noqa: E501
 parser.add_argument("--cache-root",     metavar="PATH", default=utils.env.get("DATA_CACHE"),   help="path to cache the splitted dataset")  # noqa: E501
@@ -466,7 +467,7 @@ class Model(pl.LightningModule):
         cmat: torch.Tensor = self.XYZ_TO_SRGB_D65 @ self.D65_TO_D50 @ batch["color_matrix"]  # B, 3, 3
         cmat = cmat / torch.mean(cmat, dim=-1, keepdim=True)
 
-        camera_ids = torch.tensor([self.camera_id(camera_name)
+        camera_ids = torch.tensor([(self.camera_id(camera_name) if not self.hparams.disable_id else 0)
                                    for camera_name in batch["camera_id"]],
                                   device=raw.device)
 
