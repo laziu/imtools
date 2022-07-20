@@ -36,7 +36,7 @@ utils.env.load()
 parser = argparse.ArgumentParser(description="RAW-RGB + Parameterized ISP",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("mode", choices=["train-content", "train-hyper", "test"], help="train or test")
-parser.add_argument("data", choices=["known", "unknown", "all"], nargs="?", help="Dataset to train hypernet")
+parser.add_argument("data", choices=["lg2", "sm2", "sm1", "dslr4"], nargs="?", help="Dataset to train hypernet")
 parser.add_argument("--disable-id", action="store_true", help="Disable camera id inputs")
 parser.add_argument("-o", "--save-name", metavar="NAME", default="RAW2RGB_HyperParISP",     help="name to save results")              # noqa: E501
 parser.add_argument("-O", "--save-root", metavar="PATH", default=utils.path.get("results"), help="parent directory to save results")  # noqa: E501
@@ -133,9 +133,10 @@ def train(args):
 
     if args.data is not None:
         match args.data:
-            case "known":   data = Data_TrainLarge(args)
-            case "unknown": data = Data_TrainSmall(args)
-            case "all":     data = Data_TrainAll(args)
+            case "lg2":   data = Data_TrainLarge(args)
+            case "sm2":   data = Data_TrainSmall(args)
+            case "sm1":   data = Data_TrainMini(args)
+            case "dslr4": data = Data_TrainDSLRAll(args)
             case _: raise ValueError(f"unknown data: {args.data}")
     else:
         data = Data_TrainLarge(args)
@@ -323,7 +324,15 @@ class Data_TrainSmall(Data_Base):
         )
 
 
-class Data_TrainAll(Data_Base):
+class Data_TrainMini(Data_Base):
+    def train_dataset(self, check=False):
+        return self.train_dataset_d40(check=check)
+
+    def val_dataset(self, check=False):
+        return self.val_dataset_d40(check=check)
+
+
+class Data_TrainDSLRAll(Data_Base):
     def train_dataset(self, check=False):
         return datasets.raw.Concatenate(
             self.train_dataset_a7r3(check=check),
@@ -414,12 +423,11 @@ class Model(pl.LightningModule):
         self.register_buffer("D65_TO_D50", D65_TO_D50)
         self.register_buffer("XYZ_TO_SRGB_D65", XYZ_TO_SRGB_D65)
 
-        if self.hparams.save_image:
-            if self.hparams.mode == "train":
-                Path(f"{self.hparams.logs_dir}/images/val").mkdir(parents=True, exist_ok=True)
-            elif self.hparams.mode == "test":
-                Path(f"{self.hparams.logs_dir}/images/raw").mkdir(parents=True, exist_ok=True)
-                Path(f"{self.hparams.logs_dir}/images/rgb").mkdir(parents=True, exist_ok=True)
+        if self.hparams.mode == "train":
+            Path(f"{self.hparams.logs_dir}/images/val").mkdir(parents=True, exist_ok=True)
+        elif self.hparams.mode == "test":
+            Path(f"{self.hparams.logs_dir}/images/raw").mkdir(parents=True, exist_ok=True)
+            Path(f"{self.hparams.logs_dir}/images/rgb").mkdir(parents=True, exist_ok=True)
 
     def hypertrain(self, enable: bool):
         self.hypertrain_enabled = enable
